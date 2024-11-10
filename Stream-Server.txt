@@ -1,0 +1,170 @@
+// Rutina de establecimiento de conexion
+
+
+clienteSender {
+ string ip;
+ int port;
+};
+
+dynamic_array sockets_senders[clienteSender];
+dynamic_array sockets_interrupted[clienteSender];
+
+//semaphores
+s1 = threading.Semaphore(1);
+s2 = threading.Semaphore(1);
+
+start_server() {
+ master = socket.tcp();
+ master.bind(ipaddress, ServerPort);
+ server = master.listen();
+
+ thread.new(udp-eater-puker, serverIP);
+
+ do {
+  cliente, error = server.accept();
+  if(cliente == nil)
+   return;
+  thread.new(CONTROLSTREAM, cliente, cliente.getPeer()[0]);
+ }while(true);
+
+ server.close();
+}
+
+//----------------------------------------------------------------------------------
+
+/*
+ La idea que por cada datagrama que llega al server, tengo que reenviarlo a todos 
+los clientes, para hacerlo a todos los que estén conectados les paso el datagrama. 
+Si no hay nadie conectado entonces no acumulo nada.
+*/
+
+udp-eater-puker(serverIP) {
+ receptor = socket.udp();
+ receptor.bind(localhost, 65534);
+ emisor = socket.udp();
+ while(true) {
+   datagrama, ip, puerto = receptor.receive();
+  s1.acquire();
+   foreach(sockets_senders : i) {
+    i.emisor.send(datagrama, i.ip, i.port);
+   }
+  s1.release();
+ }
+}
+
+enviarDatos(socket cliente, string mensaje) {
+ do {
+  mensaje, error =  cliente.send(mensaje);
+  if(error <> '')
+   return error;
+ } while(mensaje <> '');
+ return '';
+}
+//----------------------------------------------------------------------------------
+
+// control del Stream:
+
+CONTROLSTREAM(socket cliente, cliente_address) {
+ buff = {}
+ command = ''
+ interrupted = False
+
+ //Inicialmente debe de solicitar la conexión
+ do {
+  data, error = cliente.receive();
+  if(error == 'closed') {
+   cliente.close();
+   print("Cliente Desconectado")
+   return;
+  }
+  buff = buff + data;
+ }while( not buff.contains('CONECTAR (%d)+ \n') );
+
+ buff.extractWhere('CONECTAR ', port, '\n'); // Me quedo con el puerto en la variable port
+ buff = buff.substring( buff.positionAt('CONECTAR (%d)+ \n')+1, buff.length() ); // resto del buffer
+
+ // Con esta data pretendemos inicializar el sender UDP del stream al cliente
+ clienteSender cs;
+ cs.ip = cliente_address;
+ cs.port = port;
+
+ s1.acquire();
+ sockets_senders.add(cs);
+ s1.release();
+ // Con esto queda almacenado el socket de esta conexión particular
+
+ if(enviarDatos(cliente, 'OK\n') <> '') { //Operación para enviarle el ok
+  cliente.close();
+  s1.acquire();
+  socket_senders.remove(cs);
+  s1.release();
+  print("Cliente Desconectado")
+  return;
+ }
+
+ while(command <> 'DESCONECTAR') {
+
+  if(buff.positionAt('\n') == -1) {
+   do {
+    data, error = cliente.receive();
+    if(error == 'closed') {
+     cliente.close();
+     s1.acquire();
+     sockets_senders.remove(cs);
+     s1.release();
+     return;
+    }
+    buff = buff + data;
+   }while(buff.positionAt('\n') == -1);
+  }
+
+  command = buff.substring(0, buff.positionAt('\n'));
+  buff = buff.substring( buff.positionAt('\n')+1, buff.length() );
+
+  if(command == 'INTERRUMPIR')
+   if(not interrupted):
+    s1.acquire();
+    sockets_senders.remove(cs);
+    s1.release();
+
+    s2.acquire();
+    sockets_interrupted.add(cs);
+    s2.release();
+  else if(command == 'CONTINUAR')
+   if(interrupted):
+    s2.acquire();
+    sockets_interrupted.remove(cs);
+    s2.release();
+
+    s1.acquire();
+    sockets_senders.add(cs);
+    s1.release();
+
+  if(enviarDatos(cliente, 'OK\n') <> '') { //Operacion para enviarle el ok
+   cliente.close();
+   if(interrupted):
+    s2.acquire();
+    sockets_interrupted.remove(cs);
+    s2.release();
+   else:
+    s1.acquire();
+    sockets_senders.remove(cs);
+    s1.release();
+   print("Cliente Desconectado")
+   return
+  }
+ }
+
+ // Caso de DESCONECTAR
+ if(interrupted):
+  s2.acquire();
+  sockets_interrupted.remove(cs);
+  s2.release();
+ else:
+  s1.acquire();
+  sockets_senders.remove(cs);
+  s1.release();
+ cliente.close();
+ print("Cliente Desconectado")
+ return;
+}

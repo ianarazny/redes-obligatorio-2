@@ -1,0 +1,98 @@
+// Rutina de conexion y uso al stream server
+
+stream-client(string serverIP, integer serverPort) {
+
+ //apertura del socket de conexion
+ master = socket.tcp();
+ server, error = master.connect(serverIP, serverPort);
+ if(error == 'failure')
+  return;
+  conectadoUDP = False
+
+while(true) {
+  buff = readIOLine(); // devuelve una linea finalizada en \n
+   
+  if(buff == 'INTERRUMPIR\n' or buff == 'CONTINUAR\n') {
+    while(buff <> '') {
+     buff, error = server.send(buff);
+     if(error == 'closed') {
+      print('ERROR DE CONEXION');
+      server.close();
+      return;
+     }
+   }
+     while(true) {
+    buff, error = server.receive();
+      if(error == 'closed') {
+       print('Conexión cerrada de forma inesperada');
+       server.close();
+       return;
+      }
+      if(buff.contains('\n')) {
+       print(buff)
+       break
+      }
+    }
+  }else if (not conectadoUDP and conectar(buff) > 1024) {
+      conectadoUDP = True
+      while(buff <> '') {
+      buff, error = server.send(buff);
+      if(error == 'closed') {
+       print('ERROR DE CONEXION');
+       server.close();
+       return;
+      }
+    }
+    while(true) {
+     buff, error = server.receive();
+      if(error == 'closed') {
+       print('Conexión cerrada de forma inesperada');
+       server.close();
+       return;
+      }
+      if(buff.contains('\n')) {
+       print(buff)
+       break
+      }
+     }
+ }else if (conectadoUDP and conectar(buff) > 1024){
+      print("Finalice la sesión actual para recibir en un nuevo puerto")
+      continue
+  }else if (buff == 'DESCONECTAR\n'){
+      while(buff <> '') {
+      buff, error = server.send(buff);
+      if(error == 'closed') {
+       print('ERROR DE CONEXION');
+       server.close();
+       return;
+      }
+    }
+    while(true) {
+     buff, error = server.receive();
+      if(error == 'closed') {
+       print('Conexión cerrada de forma inesperada')
+       server.close()
+       return
+      }
+      if(buff.contains('\n')) {
+       print(buff)
+       server.close()
+       return
+      }
+     }
+  }else{
+      writeIOLine("NO OK\n")
+  }
+}
+}
+
+
+//Rutina para averiguar si la variable cumple con la sintaxis de conectar
+// si lo hace entonces retorna el valor del puerto al que el cliente espera recibir el stream.
+
+conectar(buff) {
+ if (buff.contains('CONECTAR (%d)+ \n')) {
+  return buff.extractWhere('CONECTAR ', port, '\n')
+ }
+ return 0
+}
